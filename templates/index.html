@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YouTube Comment Scraper</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f5f5f5;
+      color: #1a1a1a;
+      min-height: 100vh;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────── */
+    header {
+      background: #fff;
+      border-bottom: 1px solid #e0e0e0;
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .logo-icon {
+      width: 32px;
+      height: 32px;
+      background: #ff0000;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+    .btn-key {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      background: #fff;
+      font-size: 13px;
+      cursor: pointer;
+      color: #555;
+      transition: border-color .15s, color .15s;
+    }
+    .btn-key:hover { border-color: #ff0000; color: #ff0000; }
+
+    /* ── Layout ──────────────────────────────────────────────────── */
+    main {
+      max-width: 820px;
+      margin: 36px auto;
+      padding: 0 16px 80px;
+    }
+
+    /* ── Cards ───────────────────────────────────────────────────── */
+    .card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 12px;
+      padding: 24px 28px;
+      margin-bottom: 20px;
+    }
+    .card-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .overall-badge {
+      font-size: 12px;
+      font-weight: 500;
+      padding: 2px 10px;
+      border-radius: 20px;
+      background: #f0f0f0;
+      color: #666;
+    }
+    .overall-badge.running { background: #fff0f0; color: #cc0000; }
+    .overall-badge.done    { background: #f0faf0; color: #2e7d32; }
+    .overall-badge.error   { background: #fff3f3; color: #c62828; }
+
+    /* ── Mode toggle (segmented control) ────────────────────────── */
+    .mode-toggle {
+      display: flex;
+      background: #f0f0f0;
+      border-radius: 9px;
+      padding: 3px;
+      margin-bottom: 20px;
+      gap: 2px;
+    }
+    .mode-btn {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 9px 12px;
+      border: none;
+      border-radius: 7px;
+      background: transparent;
+      font-size: 13px;
+      font-weight: 500;
+      color: #777;
+      cursor: pointer;
+      transition: background .15s, color .15s, box-shadow .15s;
+      white-space: nowrap;
+    }
+    .mode-btn .mode-icon {
+      font-size: 15px;
+      line-height: 1;
+    }
+    .mode-btn .mode-sub {
+      font-size: 11px;
+      font-weight: 400;
+      color: #aaa;
+      display: block;
+    }
+    .mode-btn.active {
+      background: #fff;
+      color: #1a1a1a;
+      font-weight: 600;
+      box-shadow: 0 1px 4px rgba(0,0,0,.13);
+    }
+    .mode-btn.active .mode-sub { color: #888; }
+
+    /* ── Single video input ──────────────────────────────────────── */
+    .single-wrap {
+      position: relative;
+    }
+    .single-icon {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 16px;
+      color: #bbb;
+      pointer-events: none;
+      line-height: 1;
+    }
+    .single-input {
+      width: 100%;
+      padding: 13px 14px 13px 42px;
+      border: 1.5px solid #ddd;
+      border-radius: 9px;
+      font-size: 15px;
+      font-family: inherit;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .single-input:focus {
+      outline: none;
+      border-color: #ff0000;
+      box-shadow: 0 0 0 3px rgba(255,0,0,.08);
+    }
+    .single-input::placeholder { color: #bbb; }
+    .single-preview {
+      min-height: 28px;
+      margin-top: 10px;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .single-preview .vid-id-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #f0f9f0;
+      border: 1px solid #b2dfb2;
+      color: #2e7d32;
+      border-radius: 5px;
+      padding: 2px 9px;
+      font-size: 12.5px;
+      font-family: monospace;
+    }
+    .single-preview .err-text { color: #c62828; }
+
+    /* ── Multi video textarea ────────────────────────────────────── */
+    .url-textarea {
+      width: 100%;
+      min-height: 110px;
+      padding: 10px 12px;
+      border: 1.5px solid #ddd;
+      border-radius: 9px;
+      font-size: 13px;
+      font-family: inherit;
+      resize: vertical;
+      line-height: 1.7;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .url-textarea:focus {
+      outline: none;
+      border-color: #ff0000;
+      box-shadow: 0 0 0 3px rgba(255,0,0,.08);
+    }
+    .url-hint {
+      font-size: 12px;
+      color: #bbb;
+      margin-top: 6px;
+    }
+    .url-validation { margin-top: 10px; line-height: 2.1; }
+    .vid-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #f0f9f0;
+      border: 1px solid #b2dfb2;
+      color: #2e7d32;
+      border-radius: 4px;
+      padding: 2px 8px;
+      margin: 2px;
+      font-size: 12px;
+      font-family: monospace;
+    }
+    .vid-tag.bad {
+      background: #fff3f3;
+      border-color: #ffb3b3;
+      color: #c62828;
+    }
+    .multi-count {
+      margin-top: 8px;
+      font-size: 12.5px;
+      color: #888;
+      min-height: 18px;
+    }
+    .multi-count strong { color: #2e7d32; }
+
+    .btn-scrape {
+      margin-top: 16px;
+      width: 100%;
+      padding: 12px;
+      background: #ff0000;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s, opacity .15s;
+    }
+    .btn-scrape:hover:not(:disabled) { background: #cc0000; }
+    .btn-scrape:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ── Tabs ────────────────────────────────────────────────────── */
+    #progressCard { display: none; }
+
+    .tab-list {
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+      padding-bottom: 0;
+      border-bottom: 2px solid #ebebeb;
+      margin-bottom: 16px;
+      scrollbar-width: thin;
+    }
+    .tab-btn {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 14px;
+      border: 1px solid #e0e0e0;
+      border-bottom: 2px solid transparent;
+      border-radius: 6px 6px 0 0;
+      background: #f7f7f7;
+      color: #777;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      margin-bottom: -2px;
+      transition: background .12s, color .12s;
+      max-width: 180px;
+    }
+    .tab-btn .tab-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .tab-btn:hover { background: #f0f0f0; color: #333; }
+    .tab-btn.active {
+      background: #fff;
+      color: #1a1a1a;
+      font-weight: 600;
+      border-color: #e0e0e0;
+      border-bottom-color: #ff0000;
+    }
+
+    /* tab status dot */
+    .ts {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .ts.pending { background: #ccc; }
+    .ts.running { background: #ff0000; animation: pulse 1.1s ease-in-out infinite; }
+    .ts.done    { background: #2e7d32; }
+    .ts.error   { background: #c62828; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.2} }
+
+    /* ── Tab panel ───────────────────────────────────────────────── */
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .panel-left { display: flex; align-items: center; gap: 8px; }
+
+    /* larger animated dot inside panel */
+    .pd {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .pd.pending { background: #ccc; }
+    .pd.running { background: #ff0000; animation: pulse 1.1s ease-in-out infinite; }
+    .pd.done    { background: #2e7d32; }
+    .pd.error   { background: #c62828; }
+
+    .panel-status-text { font-size: 13px; font-weight: 600; color: #444; }
+    .panel-vid-id {
+      font-size: 12px;
+      color: #999;
+      font-family: monospace;
+      margin-left: 2px;
+    }
+    .panel-elapsed {
+      font-size: 12px;
+      color: #aaa;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .log {
+      background: #fafafa;
+      border: 1px solid #ebebeb;
+      border-radius: 8px;
+      padding: 10px 14px;
+      max-height: 260px;
+      overflow-y: auto;
+      font-size: 12.5px;
+      line-height: 1.75;
+      scrollbar-width: thin;
+    }
+    .log-line       { color: #444; }
+    .log-line.err   { color: #c62828; font-weight: 500; }
+    .log-line.ok    { color: #2e7d32; font-weight: 600; }
+
+    .dl-bar {
+      display: none;
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: #f0faf0;
+      border: 1px solid #b2dfb2;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #2e7d32;
+      align-items: center;
+      gap: 6px;
+    }
+    .dl-bar.visible { display: flex; }
+
+    /* ── No-key banner ───────────────────────────────────────────── */
+    .no-key-banner {
+      display: none;
+      margin-bottom: 16px;
+      padding: 10px 14px;
+      background: #fff8e1;
+      border: 1px solid #ffe082;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #795548;
+    }
+
+    /* ── Modal ───────────────────────────────────────────────────── */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.45);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(2px);
+    }
+    .overlay.hidden { display: none; }
+    .modal {
+      background: #fff;
+      border-radius: 14px;
+      padding: 36px 32px;
+      width: 420px;
+      max-width: calc(100vw - 32px);
+      box-shadow: 0 20px 60px rgba(0,0,0,.2);
+    }
+    .modal-icon {
+      width: 48px;
+      height: 48px;
+      background: #ff0000;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      margin-bottom: 16px;
+    }
+    .modal h2 { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+    .modal p  { font-size: 13px; color: #666; margin-bottom: 20px; line-height: 1.55; }
+    .modal label { font-size: 13px; font-weight: 500; display: block; margin-bottom: 6px; }
+    .modal input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: monospace;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .modal input:focus {
+      outline: none;
+      border-color: #ff0000;
+      box-shadow: 0 0 0 3px rgba(255,0,0,.08);
+    }
+    .modal-actions { display: flex; gap: 10px; margin-top: 16px; }
+    .btn-primary {
+      flex: 1;
+      padding: 10px;
+      background: #ff0000;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .btn-primary:hover:not(:disabled) { background: #cc0000; }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+    .modal-msg {
+      margin-top: 10px;
+      font-size: 12.5px;
+      min-height: 18px;
+      color: #c62828;
+    }
+    .modal-msg.ok { color: #2e7d32; }
+  </style>
+</head>
+<body>
+
+<!-- ── API Key Modal ──────────────────────────────────────────── -->
+<div class="overlay hidden" id="keyOverlay">
+  <div class="modal">
+    <div class="modal-icon">🔑</div>
+    <h2>Enter Developer Key</h2>
+    <p>A YouTube Data API v3 key is required. It is stored only in your browser's local storage and is sent only to YouTube's API.</p>
+    <label for="apiKeyInput">YouTube Data API Key</label>
+    <input type="password" id="apiKeyInput" placeholder="AIzaSy…" autocomplete="off" />
+    <div class="modal-msg" id="keyMsg"></div>
+    <div class="modal-actions">
+      <button class="btn-primary" id="saveKeyBtn" onclick="validateAndSaveKey()">Validate &amp; Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Header ────────────────────────────────────────────────── -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">▶</div>
+    YouTube Comment Scraper
+  </div>
+  <button class="btn-key" onclick="openKeyModal()">🔑 Change API Key</button>
+</header>
+
+<!-- ── Main ──────────────────────────────────────────────────── -->
+<main>
+
+  <div class="no-key-banner" id="noKeyBanner">
+    No API key saved. Enter your YouTube Data API key to get started.
+  </div>
+
+  <!-- ── Input card ── -->
+  <div class="card">
+    <div class="card-title">Scrape YouTube Videos</div>
+
+    <!-- Segmented mode toggle -->
+    <div class="mode-toggle">
+      <button class="mode-btn active" id="modeBtnSingle" onclick="setMode('single')">
+        <span class="mode-icon">▶</span>
+        <span>
+          Single Video
+          <span class="mode-sub">One URL at a time</span>
+        </span>
+      </button>
+      <button class="mode-btn" id="modeBtnMulti" onclick="setMode('multi')">
+        <span class="mode-icon">⊞</span>
+        <span>
+          Multiple Videos
+          <span class="mode-sub">Batch scrape a list</span>
+        </span>
+      </button>
+    </div>
+
+    <!-- Single mode -->
+    <div id="singleMode">
+      <div class="single-wrap">
+        <span class="single-icon">🔗</span>
+        <input
+          class="single-input"
+          id="singleInput"
+          type="text"
+          placeholder="Paste a YouTube video URL here…"
+          oninput="validateInputs()"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+      <div class="single-preview" id="singlePreview"></div>
+    </div>
+
+    <!-- Multi mode (hidden by default) -->
+    <div id="multiMode" style="display:none">
+      <textarea
+        class="url-textarea"
+        id="urlInput"
+        placeholder="https://www.youtube.com/watch?v=OlXb7K_h8PM&#10;https://youtu.be/oOwaNMfMx8M&#10;OlXb7K_h8PM"
+        oninput="validateInputs()"
+      ></textarea>
+      <div class="url-hint">
+        One URL per line — accepts <code>youtube.com/watch?v=ID</code>, <code>youtu.be/ID</code>, or a bare 11-char video ID.
+      </div>
+      <div class="url-validation" id="urlValidation"></div>
+      <div class="multi-count" id="multiCount"></div>
+    </div>
+
+    <button class="btn-scrape" id="scrapeBtn" onclick="startScrape()" disabled>
+      Scrape Comments
+    </button>
+  </div>
+
+  <!-- ── Progress card (tabs) ── -->
+  <div class="card" id="progressCard">
+    <div class="card-title">
+      Progress
+      <span class="overall-badge" id="overallBadge">—</span>
+    </div>
+    <div class="tab-list"   id="tabList"></div>
+    <div class="tab-panels" id="tabPanels"></div>
+  </div>
+
+</main>
+
+<script>
+// ── State ──────────────────────────────────────────────────────
+let apiKey    = localStorage.getItem("yt_api_key") || "";
+let inputMode = "single";           // "single" | "multi"
+let tabStates = [];                 // [{status, startTime, endTime}]
+let activeTab = 0;
+let globalTimer = null;
+
+// ── Init ───────────────────────────────────────────────────────
+(function init() {
+  if (!apiKey) {
+    document.getElementById("keyOverlay").classList.remove("hidden");
+    document.getElementById("noKeyBanner").style.display = "block";
+  }
+  document.getElementById("apiKeyInput").addEventListener("keydown", e => {
+    if (e.key === "Enter") validateAndSaveKey();
+  });
+  document.getElementById("singleInput").addEventListener("keydown", e => {
+    if (e.key === "Enter") startScrape();
+  });
+})();
+
+// ── Mode switching ─────────────────────────────────────────────
+function setMode(mode) {
+  inputMode = mode;
+  document.getElementById("singleMode").style.display = mode === "single" ? "block" : "none";
+  document.getElementById("multiMode").style.display  = mode === "multi"  ? "block" : "none";
+  document.getElementById("modeBtnSingle").classList.toggle("active", mode === "single");
+  document.getElementById("modeBtnMulti").classList.toggle("active",  mode === "multi");
+  validateInputs();
+}
+
+// ── API Key modal ──────────────────────────────────────────────
+function openKeyModal() {
+  document.getElementById("apiKeyInput").value = apiKey;
+  document.getElementById("keyMsg").textContent = "";
+  document.getElementById("keyOverlay").classList.remove("hidden");
+}
+
+async function validateAndSaveKey() {
+  const input = document.getElementById("apiKeyInput").value.trim();
+  const btn   = document.getElementById("saveKeyBtn");
+  const msg   = document.getElementById("keyMsg");
+
+  if (!input) { msg.textContent = "Please enter your API key."; return; }
+
+  btn.disabled = true;
+  btn.textContent = "Validating…";
+  msg.textContent = "";
+  msg.className = "modal-msg";
+
+  try {
+    const res  = await fetch("/validate-key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: input }),
+    });
+    const data = await res.json();
+
+    if (data.valid) {
+      apiKey = input;
+      localStorage.setItem("yt_api_key", apiKey);
+      msg.textContent = "Key validated!";
+      msg.className = "modal-msg ok";
+      document.getElementById("noKeyBanner").style.display = "none";
+      setTimeout(() => {
+        document.getElementById("keyOverlay").classList.add("hidden");
+        msg.textContent = "";
+      }, 800);
+    } else {
+      msg.textContent = "Invalid key: " + (data.message || "Unknown error.");
+    }
+  } catch (err) {
+    msg.textContent = "Network error: " + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Validate & Save";
+  }
+}
+
+// ── URL parsing ────────────────────────────────────────────────
+function extractVideoId(raw) {
+  const url = raw.trim();
+  let m = url.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+  if (m) return m[1];
+  m = url.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
+  if (m) return m[1];
+  if (/^[a-zA-Z0-9_-]{11}$/.test(url)) return url;
+  return null;
+}
+
+// Returns the list of valid video IDs for the current mode
+function getVideoIds() {
+  if (inputMode === "single") {
+    const vid = extractVideoId(document.getElementById("singleInput").value);
+    return vid ? [vid] : [];
+  }
+  return document.getElementById("urlInput").value
+    .split("\n").map(l => l.trim()).filter(Boolean)
+    .map(extractVideoId).filter(Boolean);
+}
+
+// Validate inputs and update UI feedback
+function validateInputs() {
+  const btn = document.getElementById("scrapeBtn");
+
+  if (inputMode === "single") {
+    const raw = document.getElementById("singleInput").value.trim();
+    const vid = extractVideoId(raw);
+    const preview = document.getElementById("singlePreview");
+
+    if (!raw) {
+      preview.innerHTML = "";
+      btn.textContent = "Scrape Video";
+      btn.disabled = true;
+      return;
+    }
+    if (vid) {
+      preview.innerHTML =
+        `<span style="color:#2e7d32;font-weight:500;">✓ Video ID detected</span>
+         <span class="vid-id-badge">${vid}</span>`;
+      btn.textContent = "Scrape Video";
+      btn.disabled = !apiKey;
+    } else {
+      preview.innerHTML =
+        `<span class="err-text">✗ Could not find a video ID in this URL</span>`;
+      btn.textContent = "Scrape Video";
+      btn.disabled = true;
+    }
+
+  } else {
+    const lines = document.getElementById("urlInput").value
+      .split("\n").map(l => l.trim()).filter(Boolean);
+    const valEl  = document.getElementById("urlValidation");
+    const countEl = document.getElementById("multiCount");
+
+    if (!lines.length) {
+      valEl.innerHTML = "";
+      countEl.innerHTML = "";
+      btn.textContent = "Scrape Comments";
+      btn.disabled = true;
+      return;
+    }
+
+    let html = "", validCount = 0;
+    lines.forEach(line => {
+      const vid = extractVideoId(line);
+      if (vid) { html += `<span class="vid-tag">✓ ${vid}</span>`; validCount++; }
+      else       html += `<span class="vid-tag bad">✗ unrecognised</span>`;
+    });
+    valEl.innerHTML = html;
+
+    if (validCount > 0) {
+      countEl.innerHTML =
+        `<strong>${validCount} valid video${validCount > 1 ? "s" : ""}</strong> ready to scrape`;
+      btn.textContent = `Scrape ${validCount} Video${validCount > 1 ? "s" : ""}`;
+      btn.disabled = !apiKey;
+    } else {
+      countEl.innerHTML = `No valid video URLs detected`;
+      btn.textContent = "Scrape Comments";
+      btn.disabled = true;
+    }
+  }
+}
+
+// ── Build tabs ─────────────────────────────────────────────────
+function buildTabs(videoIds) {
+  tabStates = [];
+  activeTab = 0;
+  document.getElementById("tabList").innerHTML   = "";
+  document.getElementById("tabPanels").innerHTML = "";
+  document.getElementById("overallBadge").textContent = `0 / ${videoIds.length} done`;
+  document.getElementById("overallBadge").className   = "overall-badge running";
+
+  videoIds.forEach((vid, idx) => {
+    // Tab button
+    const btn = document.createElement("button");
+    btn.className = "tab-btn" + (idx === 0 ? " active" : "");
+    btn.onclick   = () => switchTab(idx);
+    btn.innerHTML = `
+      <span class="ts pending" id="ts${idx}"></span>
+      <span class="tab-label" id="tlabel${idx}">Video ${idx + 1}</span>`;
+    document.getElementById("tabList").appendChild(btn);
+
+    // Tab panel
+    const panel = document.createElement("div");
+    panel.className = "tab-panel" + (idx === 0 ? " active" : "");
+    panel.innerHTML = `
+      <div class="panel-header">
+        <div class="panel-left">
+          <span class="pd pending" id="pd${idx}"></span>
+          <span class="panel-status-text" id="pstatus${idx}">Pending</span>
+          <span class="panel-vid-id" id="pvid${idx}">${vid}</span>
+        </div>
+        <span class="panel-elapsed" id="pelapsed${idx}">—</span>
+      </div>
+      <div class="log" id="log${idx}"></div>
+      <div class="dl-bar" id="dlbar${idx}"></div>`;
+    document.getElementById("tabPanels").appendChild(panel);
+
+    tabStates.push({ status: "pending", startTime: null, endTime: null });
+  });
+}
+
+function switchTab(idx) {
+  activeTab = idx;
+  document.querySelectorAll("#tabList .tab-btn").forEach((b, i) =>
+    b.classList.toggle("active", i === idx));
+  document.querySelectorAll("#tabPanels .tab-panel").forEach((p, i) =>
+    p.classList.toggle("active", i === idx));
+}
+
+// ── Timer ──────────────────────────────────────────────────────
+function startGlobalTimer() {
+  if (globalTimer) clearInterval(globalTimer);
+  globalTimer = setInterval(() => {
+    tabStates.forEach((s, idx) => {
+      if (s.status === "running" && s.startTime) {
+        const sec = Math.floor((Date.now() - s.startTime) / 1000);
+        document.getElementById(`pelapsed${idx}`).textContent = fmtElapsed(sec);
+      }
+    });
+  }, 1000);
+}
+
+function fmtElapsed(sec) {
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m > 0 ? `${m}m ${s}s elapsed` : `${s}s elapsed`;
+}
+
+// ── Scraping ───────────────────────────────────────────────────
+async function startScrape() {
+  if (!apiKey) { openKeyModal(); return; }
+
+  const videoIds = getVideoIds();
+  if (!videoIds.length) return;
+
+  buildTabs(videoIds);
+  document.getElementById("progressCard").style.display = "block";
+  document.getElementById("progressCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  document.getElementById("scrapeBtn").disabled = true;
+  startGlobalTimer();
+
+  // Start job
+  let jobId;
+  try {
+    const res  = await fetch("/scrape", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: apiKey, video_ids: videoIds }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    jobId = data.job_id;
+  } catch (err) {
+    appendLog(0, "Error starting scrape: " + err.message, "err");
+    finishAll(false);
+    return;
+  }
+
+  // Stream SSE
+  const evtSource = new EventSource(`/progress/${jobId}`);
+  let doneCount = 0;
+  const total   = videoIds.length;
+
+  evtSource.onmessage = function (e) {
+    const ev = JSON.parse(e.data);
+
+    switch (ev.type) {
+
+      case "heartbeat": break;
+
+      case "video_start":
+        setTabStatus(ev.video_index, "running");
+        switchTab(ev.video_index);
+        tabStates[ev.video_index].startTime = Date.now();
+        appendLog(ev.video_index, `Starting scrape for ${ev.video_id}…`);
+        break;
+
+      case "video_title": {
+        const short = ev.title.length > 22 ? ev.title.slice(0, 21) + "…" : ev.title;
+        document.getElementById(`tlabel${ev.video_index}`).textContent = short;
+        document.getElementById(`pvid${ev.video_index}`).textContent   = ev.title;
+        break;
+      }
+
+      case "progress":
+        appendLog(ev.video_index, ev.message);
+        break;
+
+      case "video_done": {
+        setTabStatus(ev.video_index, "done");
+        const s = tabStates[ev.video_index];
+        s.endTime = Date.now();
+        const dur = Math.floor((s.endTime - s.startTime) / 1000);
+        document.getElementById(`pelapsed${ev.video_index}`).textContent =
+          `Done in ${fmtDone(dur)}`;
+        appendLog(ev.video_index, ev.message, "ok");
+        triggerDownload(ev.job_id, ev.video_index, ev.filename);
+        doneCount++;
+        updateOverallBadge(doneCount, total);
+        break;
+      }
+
+      case "video_error":
+        setTabStatus(ev.video_index, "error");
+        appendLog(ev.video_index, "Error: " + ev.message, "err");
+        doneCount++;
+        updateOverallBadge(doneCount, total);
+        break;
+
+      case "all_done":
+        evtSource.close();
+        finishAll(true);
+        appendLog(activeTab, ev.message, "ok");
+        break;
+
+      case "error":
+        appendLog(activeTab, "Fatal error: " + ev.message, "err");
+        evtSource.close();
+        finishAll(false);
+        break;
+    }
+  };
+
+  evtSource.onerror = function () {
+    appendLog(activeTab, "Connection lost. The scrape may have timed out.", "err");
+    evtSource.close();
+    finishAll(false);
+  };
+}
+
+// ── Helpers ────────────────────────────────────────────────────
+function setTabStatus(idx, status) {
+  tabStates[idx].status = status;
+  document.getElementById(`ts${idx}`).className      = `ts ${status}`;
+  document.getElementById(`pd${idx}`).className      = `pd ${status}`;
+  const labels = { pending: "Pending", running: "Running…", done: "Completed", error: "Failed" };
+  document.getElementById(`pstatus${idx}`).textContent = labels[status] || status;
+}
+
+function appendLog(idx, text, cls = "") {
+  const logEl = document.getElementById(`log${idx}`);
+  if (!logEl) return;
+  const el = document.createElement("div");
+  el.className = "log-line " + cls;
+  el.textContent = text;
+  logEl.appendChild(el);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function triggerDownload(jobId, videoIndex, filename) {
+  const bar = document.getElementById(`dlbar${videoIndex}`);
+  bar.innerHTML = `✅ Downloading <strong>${filename}</strong>`;
+  bar.classList.add("visible");
+
+  const a = document.createElement("a");
+  a.href = `/download/${jobId}/${videoIndex}`;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function updateOverallBadge(done, total) {
+  const badge = document.getElementById("overallBadge");
+  badge.textContent = `${done} / ${total} done`;
+}
+
+function finishAll(success) {
+  clearInterval(globalTimer);
+  globalTimer = null;
+  document.getElementById("scrapeBtn").disabled = false;
+  const badge = document.getElementById("overallBadge");
+  badge.className = "overall-badge " + (success ? "done" : "error");
+}
+
+function fmtDone(sec) {
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+</script>
+</body>
+</html>

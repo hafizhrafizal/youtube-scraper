@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>YouTube Comment Scraper</title>
+  <title>YouTube Comment Scraper -</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -820,93 +820,112 @@ async function startScrape() {
   document.getElementById("scrapeBtn").disabled = true;
   startGlobalTimer();
 
-  // Start job
-  let jobId;
-  try {
-    const res  = await fetch("/scrape", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ api_key: apiKey, video_ids: videoIds }),
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    jobId = data.job_id;
-  } catch (err) {
-    appendLog(0, "Error starting scrape: " + err.message, "err");
-    finishAll(false);
-    return;
-  }
-
-  // Stream SSE
-  const evtSource = new EventSource(`/progress/${jobId}`);
   let doneCount = 0;
   const total   = videoIds.length;
+  let finished  = false;
 
-  evtSource.onmessage = function (e) {
-    const ev = JSON.parse(e.data);
+  try {
+    const response = await fetch("/scrape", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ api_key: apiKey, video_ids: videoIds }),
+    });
 
-    switch (ev.type) {
-
-      case "heartbeat": break;
-
-      case "video_start":
-        setTabStatus(ev.video_index, "running");
-        switchTab(ev.video_index);
-        tabStates[ev.video_index].startTime = Date.now();
-        appendLog(ev.video_index, `Starting scrape for ${ev.video_id}…`);
-        break;
-
-      case "video_title": {
-        const short = ev.title.length > 22 ? ev.title.slice(0, 21) + "…" : ev.title;
-        document.getElementById(`tlabel${ev.video_index}`).textContent = short;
-        document.getElementById(`pvid${ev.video_index}`).textContent   = ev.title;
-        break;
-      }
-
-      case "progress":
-        appendLog(ev.video_index, ev.message);
-        break;
-
-      case "video_done": {
-        setTabStatus(ev.video_index, "done");
-        const s = tabStates[ev.video_index];
-        s.endTime = Date.now();
-        const dur = Math.floor((s.endTime - s.startTime) / 1000);
-        document.getElementById(`pelapsed${ev.video_index}`).textContent =
-          `Done in ${fmtDone(dur)}`;
-        appendLog(ev.video_index, ev.message, "ok");
-        triggerDownload(ev.job_id, ev.video_index, ev.filename);
-        doneCount++;
-        updateOverallBadge(doneCount, total);
-        break;
-      }
-
-      case "video_error":
-        setTabStatus(ev.video_index, "error");
-        appendLog(ev.video_index, "Error: " + ev.message, "err");
-        doneCount++;
-        updateOverallBadge(doneCount, total);
-        break;
-
-      case "all_done":
-        evtSource.close();
-        finishAll(true);
-        appendLog(activeTab, ev.message, "ok");
-        break;
-
-      case "error":
-        appendLog(activeTab, "Fatal error: " + ev.message, "err");
-        evtSource.close();
-        finishAll(false);
-        break;
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+      throw new Error(err.error || `HTTP ${response.status}`);
     }
-  };
 
-  evtSource.onerror = function () {
-    appendLog(activeTab, "Connection lost. The scrape may have timed out.", "err");
-    evtSource.close();
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer    = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop(); // keep incomplete trailing line
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+
+        switch (ev.type) {
+
+          case "heartbeat": break;
+
+          case "video_start":
+            setTabStatus(ev.video_index, "running");
+            switchTab(ev.video_index);
+            tabStates[ev.video_index].startTime = Date.now();
+            appendLog(ev.video_index, `Starting scrape for ${ev.video_id}…`);
+            break;
+
+          case "video_title": {
+            const short = ev.title.length > 22 ? ev.title.slice(0, 21) + "…" : ev.title;
+            document.getElementById(`tlabel${ev.video_index}`).textContent = short;
+            document.getElementById(`pvid${ev.video_index}`).textContent   = ev.title;
+            break;
+          }
+
+          case "progress":
+            appendLog(ev.video_index, ev.message);
+            break;
+
+          case "video_done": {
+            setTabStatus(ev.video_index, "done");
+            const s = tabStates[ev.video_index];
+            s.endTime = Date.now();
+            const dur = Math.floor((s.endTime - s.startTime) / 1000);
+            document.getElementById(`pelapsed${ev.video_index}`).textContent =
+              `Done in ${fmtDone(dur)}`;
+            appendLog(ev.video_index, ev.message, "ok");
+            if (ev.csv) {
+              downloadCSV(ev.csv, ev.filename, ev.video_index);
+            } else {
+              const bar = document.getElementById(`dlbar${ev.video_index}`);
+              bar.innerHTML = `ℹ️ ${ev.message}`;
+              bar.style.background = "#f5f5f5";
+              bar.style.borderColor = "#ddd";
+              bar.style.color = "#666";
+              bar.classList.add("visible");
+            }
+            doneCount++;
+            updateOverallBadge(doneCount, total);
+            break;
+          }
+
+          case "video_error":
+            setTabStatus(ev.video_index, "error");
+            appendLog(ev.video_index, "Error: " + ev.message, "err");
+            doneCount++;
+            updateOverallBadge(doneCount, total);
+            break;
+
+          case "all_done":
+            finished = true;
+            finishAll(true);
+            appendLog(activeTab, ev.message, "ok");
+            break;
+
+          case "error":
+            finished = true;
+            appendLog(activeTab, "Fatal error: " + ev.message, "err");
+            finishAll(false);
+            break;
+        }
+      }
+    }
+
+    if (!finished) finishAll(true); // stream closed cleanly without all_done
+
+  } catch (err) {
+    appendLog(0, "Error: " + err.message, "err");
     finishAll(false);
-  };
+  }
 }
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -928,17 +947,25 @@ function appendLog(idx, text, cls = "") {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-function triggerDownload(jobId, videoIndex, filename) {
+function downloadCSV(b64, filename, videoIndex) {
   const bar = document.getElementById(`dlbar${videoIndex}`);
   bar.innerHTML = `✅ Downloading <strong>${filename}</strong>`;
   bar.classList.add("visible");
 
-  const a = document.createElement("a");
-  a.href = `/download/${jobId}/${videoIndex}`;
+  // Decode base64 → Blob → object URL → click
+  const bytes = atob(b64);
+  const arr   = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  const blob = new Blob([arr], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = filename;
   a.style.display = "none";
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function updateOverallBadge(done, total) {

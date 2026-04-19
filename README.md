@@ -176,6 +176,19 @@ Example: `comments_How to Make Pasta.csv`
 
 ---
 
+## Deploying to Vercel
+
+See the step-by-step guide below. The key files are already included:
+
+| File | Purpose |
+|---|---|
+| `vercel.json` | Tells Vercel how to build and route the Flask app |
+| `requirements.txt` | Python dependencies Vercel installs automatically |
+
+> **Timeout note:** Vercel's free (Hobby) plan limits each function to **10 seconds**. This is enough to validate the API key but too short for scraping real videos. The **Pro plan** allows up to **60 seconds** per function — sufficient for small-to-medium videos. For large videos with tens of thousands of comments, run the app locally or on a VPS instead.
+
+---
+
 ## Limitations
 
 - Comments must be enabled on the video (disabled comments return 0 rows)

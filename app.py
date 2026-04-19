@@ -1,18 +1,14 @@
 import json
 import io
 import re
-import uuid
-import threading
-import queue
-import time
+import base64
 
-from flask import Flask, render_template, request, Response, jsonify
+from flask import Flask, render_template, request, Response, jsonify, stream_with_context
 import googleapiclient.discovery
+from googleapiclient.errors import HttpError
 import pandas as pd
 
 app = Flask(__name__)
-# jobs[job_id] = {queue, status, videos: [{video_id, status, title, csv_data, filename}]}
-jobs = {}
 
 
 # ---------------------------------------------------------------------------
@@ -20,10 +16,10 @@ jobs = {}
 # ---------------------------------------------------------------------------
 
 def _safe_filename(title):
-    """Strip filesystem-illegal characters and limit length."""
-    safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', title)
+    safe = re.sub(r'[^\x20-\x7e]', '_', title)   # strip non-printable-ASCII (fixes latin-1 header errors)
+    safe = re.sub(r'[<>:"/\\|?*]', '_', safe)
     safe = re.sub(r'\s+', ' ', safe).strip('. ')
-    return (safe[:120] or "video")
+    return safe[:120] or "video"
 
 
 def _get_video_metadata(youtube, video_id):
@@ -35,7 +31,7 @@ def _get_video_metadata(youtube, video_id):
     if not response.get("items"):
         return None
 
-    video = response["items"][0]
+    video      = response["items"][0]
     snippet    = video.get("snippet", {})
     statistics = video.get("statistics", {})
     topics     = video.get("topicDetails", {})
@@ -92,128 +88,145 @@ def _get_replies(youtube, parent_id, video_id, metadata):
     return replies
 
 
-def _getcomments(youtube, video_id, q, video_index, video_info):
-    """Fetch all comments for a video, emitting progress events tagged with video_index."""
-    metadata = _get_video_metadata(youtube, video_id)
-    if not metadata:
-        return pd.DataFrame()
-
-    title = metadata["video_title"]
-    video_info["title"] = title  # stored so _run_scrape can build the filename
-
-    q.put({"type": "video_title", "video_index": video_index, "title": title})
-    q.put({
-        "type": "progress",
-        "video_index": video_index,
-        "message": f'Found: "{title}" — {metadata["comment_count"]:,} comments expected',
-    })
-
-    comments = []
-    next_page_token = None
-    page = 0
-
-    while True:
-        page += 1
-        response = youtube.commentThreads().list(
-            part="snippet",
-            videoId=video_id,
-            maxResults=100,
-            pageToken=next_page_token,
-            textFormat="plainText"
-        ).execute()
-
-        for item in response.get("items", []):
-            snippet = item["snippet"]
-            top = snippet["topLevelComment"]["snippet"]
-
-            comments.append({
-                "comment_id":   item["id"],
-                "username":     top.get("authorDisplayName"),
-                "user_id":      top.get("authorChannelId", {}).get("value"),
-                "comment_date": top.get("publishedAt"),
-                "rawContent":   top.get("textOriginal"),
-                "like_count":   top.get("likeCount", 0),
-                "reply_count":  snippet.get("totalReplyCount", 0),
-                "parent_id":    None,
-                "video_url":    f"https://www.youtube.com/watch?v={video_id}",
-                **metadata,
-            })
-
-            if snippet.get("totalReplyCount", 0) > 0:
-                replies = _get_replies(youtube, item["id"], video_id, metadata)
-                comments.extend(replies)
-
-        q.put({
-            "type": "progress",
-            "video_index": video_index,
-            "message": f"  Page {page} done — {len(comments):,} comments collected so far",
-        })
-
-        next_page_token = response.get("nextPageToken")
-        if not next_page_token:
-            break
-
-    return pd.DataFrame(comments)
-
-
 # ---------------------------------------------------------------------------
-# Background scrape worker
+# Scrape generator — yields SSE strings directly, no threads needed
 # ---------------------------------------------------------------------------
 
-def _run_scrape(job_id, api_key, video_ids):
-    job = jobs[job_id]
-    q   = job["queue"]
+def _scrape_generator(api_key, video_ids):
+    """
+    Generator that streams SSE-formatted progress events while scraping.
+    Each video_done event carries the CSV encoded as base64 so the browser
+    can download it without a separate /download endpoint (Vercel-compatible).
+    """
+
+    def sse(d):
+        return f"data: {json.dumps(d)}\n\n"
 
     try:
         youtube = googleapiclient.discovery.build("youtube", "v3", developerKey=api_key)
         total   = len(video_ids)
+        statuses = ["pending"] * total
 
         for idx, video_id in enumerate(video_ids):
-            video_info = job["videos"][idx]
-
-            q.put({"type": "video_start", "video_index": idx, "video_id": video_id})
-            video_info["status"] = "running"
+            yield sse({"type": "video_start", "video_index": idx, "video_id": video_id})
+            statuses[idx] = "running"
 
             try:
-                df = _getcomments(youtube, video_id, q, idx, video_info)
+                metadata = _get_video_metadata(youtube, video_id)
+                if not metadata:
+                    statuses[idx] = "error"
+                    yield sse({"type": "video_error", "video_index": idx,
+                               "message": "Video not found or unavailable."})
+                    continue
 
-                buf = io.StringIO()
-                df.to_csv(buf, index=False)
-                csv_bytes = buf.getvalue().encode("utf-8")
+                title = metadata["video_title"]
+                yield sse({"type": "video_title", "video_index": idx, "title": title})
+                yield sse({"type": "progress", "video_index": idx,
+                           "message": f'Found: "{title}" — {metadata["comment_count"]:,} comments expected'})
 
-                title    = video_info.get("title") or video_id
+                comments = []
+                next_page_token = None
+                page = 0
+                comments_disabled = False
+
+                while True:
+                    page += 1
+                    try:
+                        response = youtube.commentThreads().list(
+                            part="snippet",
+                            videoId=video_id,
+                            maxResults=100,
+                            pageToken=next_page_token,
+                            textFormat="plainText"
+                        ).execute()
+                    except HttpError as exc:
+                        reason = ""
+                        try:
+                            reason = json.loads(exc.content)["error"]["errors"][0]["reason"]
+                        except Exception:
+                            pass
+                        if reason == "commentsDisabled":
+                            comments_disabled = True
+                            break
+                        raise
+
+                    for item in response.get("items", []):
+                        snippet = item["snippet"]
+                        top     = snippet["topLevelComment"]["snippet"]
+
+                        comments.append({
+                            "comment_id":   item["id"],
+                            "username":     top.get("authorDisplayName"),
+                            "user_id":      top.get("authorChannelId", {}).get("value"),
+                            "comment_date": top.get("publishedAt"),
+                            "rawContent":   top.get("textOriginal"),
+                            "like_count":   top.get("likeCount", 0),
+                            "reply_count":  snippet.get("totalReplyCount", 0),
+                            "parent_id":    None,
+                            "video_url":    f"https://www.youtube.com/watch?v={video_id}",
+                            **metadata,
+                        })
+
+                        if snippet.get("totalReplyCount", 0) > 0:
+                            replies = _get_replies(youtube, item["id"], video_id, metadata)
+                            comments.extend(replies)
+
+                    yield sse({"type": "progress", "video_index": idx,
+                               "message": f"  Page {page} done — {len(comments):,} comments so far"})
+
+                    next_page_token = response.get("nextPageToken")
+                    if not next_page_token:
+                        break
+
                 filename = f"comments_{_safe_filename(title)}.csv"
+                statuses[idx] = "done"
 
-                video_info["csv_data"] = csv_bytes
-                video_info["filename"] = filename
-                video_info["status"]   = "done"
+                if comments_disabled:
+                    yield sse({
+                        "type":        "video_done",
+                        "video_index": idx,
+                        "filename":    filename,
+                        "message":     "Comments are disabled for this video.",
+                        "csv":         None,
+                    })
+                    continue
 
-                q.put({
+                if not comments:
+                    yield sse({
+                        "type":        "video_done",
+                        "video_index": idx,
+                        "filename":    filename,
+                        "message":     "This video has no comments yet.",
+                        "csv":         None,
+                    })
+                    continue
+
+                df       = pd.DataFrame(comments)
+                buf      = io.StringIO()
+                df.to_csv(buf, index=False)
+                csv_b64  = base64.b64encode(buf.getvalue().encode("utf-8")).decode("utf-8")
+
+                yield sse({
                     "type":        "video_done",
                     "video_index": idx,
-                    "job_id":      job_id,
                     "filename":    filename,
-                    "message":     f"Done — {len(df):,} rows collected. Downloading {filename}…",
+                    "message":     f"Done — {len(df):,} rows collected.",
+                    "csv":         csv_b64,
                 })
 
             except Exception as exc:
-                video_info["status"] = "error"
-                q.put({"type": "video_error", "video_index": idx, "message": str(exc)})
+                statuses[idx] = "error"
+                yield sse({"type": "video_error", "video_index": idx, "message": str(exc)})
 
-        done_count  = sum(1 for v in job["videos"] if v["status"] == "done")
-        error_count = total - done_count
-        job["status"] = "done"
-        q.put({
+        done   = statuses.count("done")
+        errors = total - done
+        yield sse({
             "type":    "all_done",
-            "message": (
-                f"All {total} video(s) processed — "
-                f"{done_count} succeeded, {error_count} failed."
-            ),
+            "message": f"All {total} video(s) processed — {done} succeeded, {errors} failed.",
         })
 
     except Exception as exc:
-        job["status"] = "error"
-        q.put({"type": "error", "message": str(exc)})
+        yield sse({"type": "error", "message": str(exc)})
 
 
 # ---------------------------------------------------------------------------
@@ -249,65 +262,12 @@ def start_scrape():
     if not video_ids:
         return jsonify({"error": "At least one video URL is required."}), 400
 
-    job_id = str(uuid.uuid4())
-    q      = queue.Queue()
-    jobs[job_id] = {
-        "queue":  q,
-        "status": "running",
-        "videos": [
-            {"video_id": vid, "status": "pending",
-             "title": None, "csv_data": None, "filename": None}
-            for vid in video_ids
-        ],
-    }
-
-    t = threading.Thread(target=_run_scrape, args=(job_id, api_key, video_ids), daemon=True)
-    t.start()
-
-    return jsonify({"job_id": job_id, "total": len(video_ids)})
-
-
-@app.route("/progress/<job_id>")
-def progress(job_id):
-    if job_id not in jobs:
-        return jsonify({"error": "Job not found."}), 404
-
-    def generate():
-        job = jobs[job_id]
-        while True:
-            try:
-                event = job["queue"].get(timeout=60)
-                yield f"data: {json.dumps(event)}\n\n"
-                if event["type"] in ("all_done", "error"):
-                    break
-            except queue.Empty:
-                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
-
     return Response(
-        generate(),
+        stream_with_context(_scrape_generator(api_key, video_ids)),
         mimetype="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
-@app.route("/download/<job_id>/<int:video_index>")
-def download(job_id, video_index):
-    job = jobs.get(job_id)
-    if not job:
-        return "Job not found.", 404
-    videos = job.get("videos", [])
-    if video_index >= len(videos):
-        return "Invalid video index.", 404
-    v = videos[video_index]
-    if v["status"] != "done" or not v["csv_data"]:
-        return "Download not ready.", 404
-
-    return Response(
-        v["csv_data"],
-        mimetype="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{v["filename"]}"'},
-    )
-
-
 if __name__ == "__main__":
-    app.run(debug=True, threaded=True, port=5000)
+    app.run(debug=True, port=5000)

@@ -9,7 +9,7 @@ from tqdm import tqdm
 api_service_name = "youtube"
 api_version = "v3"
 #############CUSTOMIZE HERE - INSERT YOUR DEV KEY#######################
-DEVELOPER_KEY = 'AIzaSyDbluwbTaRxlEOnVRiUUXdsrSEcL9krpOg' # Replace with your actual key
+DEVELOPER_KEY = '#' # Replace with your actual key
 ##################################################
 youtube = googleapiclient.discovery.build(api_service_name, api_version, developerKey=DEVELOPER_KEY)
 

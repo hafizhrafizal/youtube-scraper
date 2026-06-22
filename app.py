@@ -1,5 +1,6 @@
 import json
 import io
+import os
 import re
 import base64
 
@@ -9,6 +10,8 @@ from googleapiclient.errors import HttpError
 import pandas as pd
 
 app = Flask(__name__)
+
+DEFAULT_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
 
 
 # ---------------------------------------------------------------------------
@@ -238,9 +241,14 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/config")
+def config():
+    return jsonify({"has_default_key": bool(DEFAULT_API_KEY)})
+
+
 @app.route("/validate-key", methods=["POST"])
 def validate_key():
-    api_key = (request.json or {}).get("api_key", "").strip()
+    api_key = (request.json or {}).get("api_key", "").strip() or DEFAULT_API_KEY
     if not api_key:
         return jsonify({"valid": False, "message": "API key cannot be empty."})
     try:
@@ -254,7 +262,7 @@ def validate_key():
 @app.route("/scrape", methods=["POST"])
 def start_scrape():
     data      = request.json or {}
-    api_key   = data.get("api_key", "").strip()
+    api_key   = data.get("api_key", "").strip() or DEFAULT_API_KEY
     video_ids = data.get("video_ids", [])
 
     if not api_key:

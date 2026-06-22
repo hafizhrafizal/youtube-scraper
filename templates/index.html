@@ -579,15 +579,21 @@
 
 <script>
 // ── State ──────────────────────────────────────────────────────
-let apiKey    = localStorage.getItem("yt_api_key") || "";
-let inputMode = "single";           // "single" | "multi"
-let tabStates = [];                 // [{status, startTime, endTime}]
-let activeTab = 0;
-let globalTimer = null;
+let apiKey        = localStorage.getItem("yt_api_key") || "";
+let hasDefaultKey = false;
+let inputMode     = "single";       // "single" | "multi"
+let tabStates     = [];             // [{status, startTime, endTime}]
+let activeTab     = 0;
+let globalTimer   = null;
 
 // ── Init ───────────────────────────────────────────────────────
-(function init() {
-  if (!apiKey) {
+(async function init() {
+  try {
+    const cfg = await fetch("/config").then(r => r.json());
+    hasDefaultKey = !!cfg.has_default_key;
+  } catch (_) {}
+
+  if (!apiKey && !hasDefaultKey) {
     document.getElementById("keyOverlay").classList.remove("hidden");
     document.getElementById("noKeyBanner").style.display = "block";
   }
@@ -597,6 +603,7 @@ let globalTimer = null;
   document.getElementById("singleInput").addEventListener("keydown", e => {
     if (e.key === "Enter") startScrape();
   });
+  validateInputs();
 })();
 
 // ── Mode switching ─────────────────────────────────────────────
@@ -699,7 +706,7 @@ function validateInputs() {
         `<span style="color:#2e7d32;font-weight:500;">✓ Video ID detected</span>
          <span class="vid-id-badge">${vid}</span>`;
       btn.textContent = "Scrape Video";
-      btn.disabled = !apiKey;
+      btn.disabled = !apiKey && !hasDefaultKey;
     } else {
       preview.innerHTML =
         `<span class="err-text">✗ Could not find a video ID in this URL</span>`;
@@ -733,7 +740,7 @@ function validateInputs() {
       countEl.innerHTML =
         `<strong>${validCount} valid video${validCount > 1 ? "s" : ""}</strong> ready to scrape`;
       btn.textContent = `Scrape ${validCount} Video${validCount > 1 ? "s" : ""}`;
-      btn.disabled = !apiKey;
+      btn.disabled = !apiKey && !hasDefaultKey;
     } else {
       countEl.innerHTML = `No valid video URLs detected`;
       btn.textContent = "Scrape Comments";

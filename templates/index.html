@@ -481,6 +481,9 @@
         Get one here →
       </a>
     </p>
+    <div class="modal-hint" id="keyModalHint" style="display:none;margin-bottom:10px;padding:8px 12px;background:#e8f5e9;border-radius:6px;font-size:0.85rem;color:#2e7d32;">
+      A server default key is active. Leave the field blank to keep using it, or enter your own key to override.
+    </div>
     <label for="apiKeyInput">YouTube Data API Key</label>
     <input type="password" id="apiKeyInput" placeholder="AIzaSy…" autocomplete="off" />
     <div class="modal-msg" id="keyMsg"></div>
@@ -620,6 +623,7 @@ function setMode(mode) {
 function openKeyModal() {
   document.getElementById("apiKeyInput").value = apiKey;
   document.getElementById("keyMsg").textContent = "";
+  document.getElementById("keyModalHint").style.display = hasDefaultKey ? "block" : "none";
   document.getElementById("keyOverlay").classList.remove("hidden");
 }
 
@@ -627,6 +631,20 @@ async function validateAndSaveKey() {
   const input = document.getElementById("apiKeyInput").value.trim();
   const btn   = document.getElementById("saveKeyBtn");
   const msg   = document.getElementById("keyMsg");
+
+  if (!input && hasDefaultKey) {
+    apiKey = "";
+    localStorage.removeItem("yt_api_key");
+    msg.textContent = "Reverted to server default key.";
+    msg.className = "modal-msg ok";
+    document.getElementById("noKeyBanner").style.display = "none";
+    validateInputs();
+    setTimeout(() => {
+      document.getElementById("keyOverlay").classList.add("hidden");
+      msg.textContent = "";
+    }, 800);
+    return;
+  }
 
   if (!input) { msg.textContent = "Please enter your API key."; return; }
 

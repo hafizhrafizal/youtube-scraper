@@ -3,5 +3,11 @@ services:
     build: .
     container_name: youtube-scraper
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:5000:5000"
+    networks:
+      - app_net
+
+networks:
+  app_net:
+    external: true
+    name: app_default
+

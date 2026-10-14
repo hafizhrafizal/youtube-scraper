@@ -35,3 +35,6 @@ desktop.ini
 .vscode/
 .idea/
 *.code-workspace
+
+# ── App data (usage counters) ──────────────────────────────────────
+data/

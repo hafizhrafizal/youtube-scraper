@@ -395,6 +395,23 @@
       color: #795548;
     }
 
+    /* ── Shared-key usage note ────────────────────────────────────── */
+    .usage-note {
+      display: none;
+      margin-bottom: 16px;
+      padding: 10px 14px;
+      background: #e8f5e9;
+      border: 1px solid #c8e6c9;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #2e7d32;
+    }
+    .usage-note.low {
+      background: #fff8e1;
+      border-color: #ffe082;
+      color: #795548;
+    }
+
     /* ── Modal ───────────────────────────────────────────────────── */
     .overlay {
       position: fixed;
@@ -483,7 +500,7 @@
       </a>
     </p>
     <div class="modal-hint" id="keyModalHint" style="display:none;margin-bottom:10px;padding:8px 12px;background:#e8f5e9;border-radius:6px;font-size:0.85rem;color:#2e7d32;">
-      A server default key is active. Leave the field blank to keep using it, or enter your own key to override.
+      A shared server key is active (with a daily per-visitor limit). Leave the field blank to keep using it, or enter your own key for unlimited use.
     </div>
     <label for="apiKeyInput">YouTube Data API Key</label>
     <input type="password" id="apiKeyInput" placeholder="AIzaSy…" autocomplete="off" />
@@ -509,6 +526,8 @@
   <div class="no-key-banner" id="noKeyBanner">
     No API key saved. Enter your YouTube Data API key to get started.
   </div>
+
+  <div class="usage-note" id="usageNote"></div>
 
   <!-- ── Input card ── -->
   <div class="card">
@@ -592,10 +611,7 @@ let globalTimer   = null;
 
 // ── Init ───────────────────────────────────────────────────────
 (async function init() {
-  try {
-    const cfg = await fetch("config").then(r => r.json());
-    hasDefaultKey = !!cfg.has_default_key;
-  } catch (_) {}
+  await loadConfig();
 
   if (!apiKey && !hasDefaultKey) {
     document.getElementById("keyOverlay").classList.remove("hidden");
@@ -620,6 +636,27 @@ function setMode(mode) {
   validateInputs();
 }
 
+// ── Server config / shared-key usage ───────────────────────────
+async function loadConfig() {
+  try {
+    const cfg = await fetch("config").then(r => r.json());
+    hasDefaultKey = !!cfg.has_default_key;
+    renderUsage(cfg.usage);
+  } catch (_) {}
+}
+
+function renderUsage(usage) {
+  const el = document.getElementById("usageNote");
+  if (!usage || apiKey) { el.style.display = "none"; return; }
+  const left = Math.max(0, Math.min(usage.limit - usage.used, usage.shared_left));
+  el.textContent =
+    `Using the shared API key — about ${(left * 100).toLocaleString()} comments left for you today ` +
+    `(${left.toLocaleString()} of ${usage.limit.toLocaleString()} requests). ` +
+    `Resets at midnight Pacific time. Add your own key via "Change API Key" for unlimited use.`;
+  el.classList.toggle("low", left < usage.limit * 0.1);
+  el.style.display = "block";
+}
+
 // ── API Key modal ──────────────────────────────────────────────
 function openKeyModal() {
   document.getElementById("apiKeyInput").value = apiKey;
@@ -637,6 +674,7 @@ async function validateAndSaveKey() {
     apiKey = "";
     localStorage.removeItem("yt_api_key");
     msg.textContent = "Reverted to server default key.";
+    loadConfig();
     msg.className = "modal-msg ok";
     document.getElementById("noKeyBanner").style.display = "none";
     validateInputs();
@@ -665,6 +703,7 @@ async function validateAndSaveKey() {
     if (data.valid) {
       apiKey = input;
       localStorage.setItem("yt_api_key", apiKey);
+      renderUsage(null);
       msg.textContent = "Key validated!";
       msg.className = "modal-msg ok";
       document.getElementById("noKeyBanner").style.display = "none";
@@ -835,7 +874,7 @@ function fmtElapsed(sec) {
 
 // ── Scraping ───────────────────────────────────────────────────
 async function startScrape() {
-  if (!apiKey) { openKeyModal(); return; }
+  if (!apiKey && !hasDefaultKey) { openKeyModal(); return; }
 
   const videoIds = getVideoIds();
   if (!videoIds.length) return;
@@ -952,6 +991,7 @@ async function startScrape() {
     appendLog(0, "Error: " + err.message, "err");
     finishAll(false);
   }
+  loadConfig();
 }
 
 // ── Helpers ────────────────────────────────────────────────────

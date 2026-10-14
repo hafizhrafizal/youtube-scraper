@@ -300,6 +300,8 @@ def _scrape_generator(api_key, video_ids, charge=_no_charge):
                                 comments.extend(_get_replies(youtube, item["id"], video_id, metadata, charge))
                             except QuotaExceeded as exc:
                                 quota_msg = str(exc)
+                            # Write something so an abandoned client is noticed before more quota is spent
+                            yield sse({"type": "heartbeat"})
 
                     yield sse({"type": "progress", "video_index": idx,
                                "message": f"  Page {page} done — {len(comments):,} comments so far"})

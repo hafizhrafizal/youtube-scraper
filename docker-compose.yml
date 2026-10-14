@@ -4,11 +4,6 @@ services:
     container_name: youtube-scraper
     restart: unless-stopped
     env_file: .env
-    networks:
-      - app_net
-
-networks:
-  app_net:
-    external: true
-    name: app_default
-
+    # Only reachable via host nginx (apps.hafizhrafizal.com/yt-scraper/)
+    ports:
+      - "127.0.0.1:5001:5000"

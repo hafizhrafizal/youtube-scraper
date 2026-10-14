@@ -593,7 +593,7 @@ let globalTimer   = null;
 // ── Init ───────────────────────────────────────────────────────
 (async function init() {
   try {
-    const cfg = await fetch("/config").then(r => r.json());
+    const cfg = await fetch("config").then(r => r.json());
     hasDefaultKey = !!cfg.has_default_key;
   } catch (_) {}
 
@@ -655,7 +655,7 @@ async function validateAndSaveKey() {
   msg.className = "modal-msg";
 
   try {
-    const res  = await fetch("/validate-key", {
+    const res  = await fetch("validate-key", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ api_key: input }),
@@ -851,7 +851,7 @@ async function startScrape() {
   let finished  = false;
 
   try {
-    const response = await fetch("/scrape", {
+    const response = await fetch("scrape", {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
       body:    JSON.stringify({ api_key: apiKey, video_ids: videoIds }),
